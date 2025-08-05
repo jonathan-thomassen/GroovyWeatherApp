@@ -16,9 +16,17 @@ class WeatherApiClient {
     private final String apiKey
     private final String baseUrl = "https://api.openweathermap.org/data/2.5"
     private final JsonSlurper jsonSlurper = new JsonSlurper()
+    private final String units
+    private final String tempUnit
+    private final String speedUnit
+    private final boolean useImperialUnits
     
-    WeatherApiClient(String apiKey) {
+    WeatherApiClient(String apiKey, boolean useImperialUnits = false) {
         this.apiKey = apiKey
+        this.units = useImperialUnits ? "imperial" : "metric"
+        this.tempUnit = useImperialUnits ? "°F" : "°C"
+        this.speedUnit = useImperialUnits ? "mph" : "m/s"
+        this.useImperialUnits = useImperialUnits
     }
     
     /**
@@ -27,7 +35,7 @@ class WeatherApiClient {
     def getCurrentWeather(String city) {
         try {
             def encodedCity = URLEncoder.encode(city, "UTF-8")
-            def url = "${baseUrl}/weather?q=${encodedCity}&appid=${apiKey}&units=metric"
+            def url = "${baseUrl}/weather?q=${encodedCity}&appid=${apiKey}&units=${units}"
             
             def httpClient = HttpClients.createDefault()
             def httpGet = new HttpGet(url)
@@ -53,7 +61,7 @@ class WeatherApiClient {
     def getForecast(String city) {
         try {
             def encodedCity = URLEncoder.encode(city, "UTF-8")
-            def url = "${baseUrl}/forecast?q=${encodedCity}&appid=${apiKey}&units=metric"
+            def url = "${baseUrl}/forecast?q=${encodedCity}&appid=${apiKey}&units=${units}"
             
             def httpClient = HttpClients.createDefault()
             def httpGet = new HttpGet(url)
@@ -79,12 +87,28 @@ class WeatherApiClient {
     private def formatCurrentWeather(weatherData) {
         def result = []
         result << "=== Current Weather for ${weatherData.name}, ${weatherData.sys.country} ==="
-        result << "Temperature: ${weatherData.main.temp}°C (feels like ${weatherData.main.feels_like}°C)"
+        result << "Temperature: ${weatherData.main.temp}${tempUnit} (feels like ${weatherData.main.feels_like}${tempUnit})"
         result << "Weather: ${weatherData.weather[0].main} - ${weatherData.weather[0].description}"
         result << "Humidity: ${weatherData.main.humidity}%"
-        result << "Pressure: ${weatherData.main.pressure} hPa"
-        result << "Wind Speed: ${weatherData.wind.speed} m/s"
-        result << "Visibility: ${weatherData.visibility / 1000} km"
+        
+        // Convert pressure: hPa to psi if imperial units
+        if (useImperialUnits) {
+            def pressurePsi = Math.round(weatherData.main.pressure * 0.0145038 * 100) / 100
+            result << "Pressure: ${pressurePsi} psi"
+        } else {
+            result << "Pressure: ${weatherData.main.pressure} hPa"
+        }
+        
+        result << "Wind Speed: ${weatherData.wind.speed} ${speedUnit}"
+        
+        // Convert visibility: meters to miles if imperial units
+        if (useImperialUnits) {
+            def visibilityMiles = Math.round(weatherData.visibility * 0.000621371 * 100) / 100
+            result << "Visibility: ${visibilityMiles} miles"
+        } else {
+            result << "Visibility: ${weatherData.visibility / 1000} km"
+        }
+        
         result << ""
         return result.join("\n")
     }
@@ -109,7 +133,7 @@ class WeatherApiClient {
                 currentDate = dateStr
             }
             
-            result << "${timeStr}: ${forecast.main.temp}°C, ${forecast.weather[0].description}"
+            result << "${timeStr}: ${forecast.main.temp}${tempUnit}, ${forecast.weather[0].description}"
         }
         
         return result.join("\n")
@@ -117,6 +141,24 @@ class WeatherApiClient {
 }
 
 static void main(String[] args) {
+    // Define valid arguments
+    def validArgs = ["-imperial"]
+    
+    // Check for invalid arguments
+    def invalidArgs = args.findAll { arg -> !validArgs.contains(arg) }
+    if (invalidArgs) {
+        println "Error: Unrecognized argument(s): ${invalidArgs.join(', ')}"
+        println "Valid arguments:"
+        println "  -imperial    Use imperial units (Fahrenheit, mph) instead of metric"
+        println ""
+        println "Usage: groovy Main.groovy [-imperial]"
+        return
+    }
+    
+    // Check for -imperial argument
+    def useImperialUnits = args.contains("-imperial")
+    def unitsDisplay = useImperialUnits ? "Imperial" : "Metric"
+    
     def apiKeyFile = new File("key")
     
     if (!apiKeyFile.exists()) {
@@ -140,10 +182,11 @@ static void main(String[] args) {
         return
     }
     
-    def weatherClient = new WeatherApiClient(apiKey)
+    def weatherClient = new WeatherApiClient(apiKey, useImperialUnits)
     
     println "Weather Forecast API Client"
     println "======================="
+    println "Units: ${unitsDisplay}"
     println ""
     
     def scanner = new Scanner(System.in)
@@ -176,4 +219,6 @@ static void main(String[] args) {
     }
     
     println "Thank you for using the Weather API Client!"
+
+    
 }
