@@ -17,6 +17,59 @@ import java.util.TimeZone
 import java.text.SimpleDateFormat
 
 /**
+ * Country Code Utility for converting ISO country codes to names
+ */
+class CountryCodeUtil {
+    private static Map<String, String> countryCodeMap = [:]
+    
+    static {
+        loadCountryCodes()
+    }
+    
+    private static void loadCountryCodes() {
+        def csvFile = new File("IsoCountryCodes.csv")
+        if (!csvFile.exists()) {
+            println "Warning: 'IsoCountryCodes.csv' file not found. Using country codes instead of names."
+            return
+        }
+        
+        try {
+            csvFile.eachLine { line, lineNumber ->
+                if (lineNumber == 1) return // Skip header
+                
+                def parts = line.split(',')
+                if (parts.length >= 2) {
+                    def countryName = parts[0].trim()
+                    def countryCode = parts[1].trim()
+                    
+                    // Remove quotes if present
+                    if (countryName.startsWith('"') && countryName.endsWith('"')) {
+                        countryName = countryName.substring(1, countryName.length() - 1)
+                    }
+                    if (countryCode.startsWith('"') && countryCode.endsWith('"')) {
+                        countryCode = countryCode.substring(1, countryCode.length() - 1)
+                    }
+                    
+                    countryCodeMap[countryCode] = countryName
+                }
+            }
+            println "Loaded ${countryCodeMap.size()} country codes"
+        } catch (Exception e) {
+            println "Error loading country codes: ${e.message}"
+        }
+    }
+    
+    static String getCountryName(String countryCode) {
+        if (!countryCode || countryCode.trim().isEmpty()) {
+            return ""
+        }
+        
+        def countryName = countryCodeMap[countryCode.toUpperCase()]
+        return countryName ?: countryCode // Return original code if not found
+    }
+}
+
+/**
  * Weather API Client using OpenWeatherMap API
  */
 class WeatherApiClient {
@@ -125,8 +178,8 @@ class WeatherApiClient {
             result << "DAY_START:${dateStr}"
             dayGroups[dateStr].each { forecast ->
                 def date = new Date(forecast.dt * 1000L)
-                def timeStr = date.format("HH:mm")
-                result << "${timeStr}: ${forecast.main.temp}°C, ${forecast.weather[0].description}"
+                // Store the Unix timestamp for proper timezone conversion later
+                result << "${forecast.dt}: ${forecast.main.temp}°C, ${forecast.weather[0].description}"
             }
             result << "DAY_END"
         }
@@ -210,7 +263,7 @@ context.addServlet(new ServletHolder(new HttpServlet() {
 }), "/static/*")
 
 // Function to read and process HTML template
-def loadHtmlTemplate(String city, String timezone, String units, String timeformat, String currentTableHtml, String forecastTableHtml, String cityName) {
+def loadHtmlTemplate(String city, String timezone, String units, String timeformat, String currentTableHtml, String forecastTableHtml, String cityName, TimeZone cityTimezone) {
     def templateFile = new File("static/index.html")
     if (!templateFile.exists()) {
         return "<html><body><h1>Template file not found</h1></body></html>"
@@ -226,13 +279,10 @@ def loadHtmlTemplate(String city, String timezone, String units, String timeform
     
     // Add conditional headers and content
     if (city && !city.trim().isEmpty()) {
-        template = template.replace("{{CITY_HEADER}}", "<h1 style='font-family: \"Segoe UI\", \"Helvetica Neue\", Arial, sans-serif; font-weight: 300; color: #007cba; text-align: center; margin: 30px 0 20px 0; font-size: 32px; letter-spacing: 1px; text-shadow: 0 2px 4px rgba(0,124,186,0.1); background: linear-gradient(135deg, #007cba, #005a87); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;'>${cityName}</h1>")
-        template = template.replace("{{CURRENT_WEATHER_HEADER}}", '<h2>Current Weather</h2>')
-        template = template.replace("{{FORECAST_HEADER}}", '<h2>5-Day Forecast</h2>')
+        // City header is now integrated into the current weather display
+        template = template.replace("{{CITY_HEADER}}", '')
     } else {
         template = template.replace("{{CITY_HEADER}}", '')
-        template = template.replace("{{CURRENT_WEATHER_HEADER}}", '')
-        template = template.replace("{{FORECAST_HEADER}}", '')
     }
     
     template = template.replace("{{CURRENT_WEATHER_CONTENT}}", currentTableHtml)
@@ -259,13 +309,14 @@ context.addServlet(new ServletHolder(new HttpServlet() {
         def currentTableHtml = ""
         def forecastTableHtml = ""
         def cityName = ""
+        def cityTimezone = TimeZone.getDefault()
         
         if (city && !city.trim().isEmpty()) {
             // Always fetch weather data in metric units - conversion handled client-side
             def weatherClient = new WeatherApiClient(apiKey) // Simplified constructor
             def currentResult = weatherClient.getCurrentWeather(city)
             def forecastResult = weatherClient.getForecast(city)
-            def cityTimezone = getCityTimezone(city, apiKey)
+            cityTimezone = getCityTimezone(city, apiKey)
             
             // Extract city name from current weather result
             cityName = extractCityName(currentResult)
@@ -280,7 +331,7 @@ context.addServlet(new ServletHolder(new HttpServlet() {
         }
         
         resp.contentType = "text/html"
-        def htmlContent = loadHtmlTemplate(city, timezone, units, timeformat, currentTableHtml, forecastTableHtml, cityName)
+        def htmlContent = loadHtmlTemplate(city, timezone, units, timeformat, currentTableHtml, forecastTableHtml, cityName, cityTimezone)
         resp.writer.println(htmlContent)
     }
 }), "/*")
@@ -355,66 +406,162 @@ def formatResultAsTable(String result, String type, TimeZone cityTimezone, boole
         }
         
     } else {
-        // Format current weather as table
-        html.append("<table>")
-        html.append("<tr><th>Property</th><th>Value</th></tr>")
+        // Extract weather data from lines
+        def weatherData = [:]
+        def cityName = ""
+        def countryCode = ""
         
         lines.each { line ->
             line = line.trim()
             if (line.startsWith("===")) {
-                // Skip city header - it's now displayed above the table
-                return
+                // Extract city and country from header
+                def match = line =~ /=== Current Weather for (.+?) ===/
+                if (match) {
+                    def fullLocation = match[0][1]
+                    def locationParts = fullLocation.split(",", 2)
+                    cityName = locationParts.length > 0 ? locationParts[0].trim() : fullLocation
+                    countryCode = locationParts.length > 1 ? locationParts[1].trim() : ""
+                }
             } else if (line.contains(":") && !line.isEmpty()) {
-                // Property line: "Temperature: 22.5°C (feels like 23.1°C)"
                 def parts = line.split(":", 2)
                 if (parts.length == 2) {
                     def property = parts[0].trim()
                     def value = parts[1].trim()
-                    
-                    // Handle temperature with unit conversion
-                    if (property == "Temperature") {
-                        def metricValue = roundTemperatureInValue(value)
-                        def imperialValue = convertTemperatureInValueToImperial(value)
-                        
-                        html.append("<tr>")
-                        html.append("<td>${property}</td>")
-                        html.append("<td>")
-                        html.append("<span class='metric-units'>${metricValue}</span>")
-                        html.append("<span class='imperial-units' style='display: none;'>${imperialValue}</span>")
-                        html.append("</td>")
-                        html.append("</tr>")
-                    } else {
-                        // Handle other properties that may have units
-                        if (property == "Pressure" || property == "Wind Speed" || property == "Visibility") {
-                            def metricValue = value
-                            def imperialValue = convertPropertyToImperial(property, value)
-                            
-                            html.append("<tr>")
-                            html.append("<td>${property}</td>")
-                            html.append("<td>")
-                            html.append("<span class='metric-units'>${metricValue}</span>")
-                            html.append("<span class='imperial-units' style='display: none;'>${imperialValue}</span>")
-                            html.append("</td>")
-                            html.append("</tr>")
-                        } else {
-                            // Convert weather descriptions to icons
-                            if (property == "Weather") {
-                                def descParts = value.split(" - ", 2)
-                                def desc = descParts.length > 1 ? descParts[1] : value
-                                def icon = getWeatherIcon(desc)
-                                value = "${icon} ${value}"
-                            }
-                            
-                            html.append("<tr>")
-                            html.append("<td>${property}</td>")
-                            html.append("<td>${value}</td>")
-                            html.append("</tr>")
-                        }
-                    }
+                    weatherData[property] = value
                 }
             }
         }
-        html.append("</table>")
+        
+        // Get current time in both timezones
+        def now = new Date()
+        def yourFormat = new SimpleDateFormat("HH:mm")
+        def cityFormat = new SimpleDateFormat("HH:mm")
+        
+        yourFormat.timeZone = TimeZone.getDefault()
+        cityFormat.timeZone = cityTimezone
+        
+        def yourTime = yourFormat.format(now)
+        def cityTime = cityFormat.format(now)
+        def yourTime12 = convertTo12Hour(yourTime)
+        def cityTime12 = convertTo12Hour(cityTime)
+        
+        // Create three-column layout for current weather
+        html.append("<div class='current-weather-container'>")
+        
+        // Top row: three main columns
+        html.append("<div class='current-weather-top'>")
+        
+        // Column 1: City, Country, Time
+        html.append("<div class='location-time-column'>")
+        html.append("<div class='location-info'>")
+        html.append("<div class='city-name-display'>${cityName}</div>")
+        if (countryCode) {
+            def countryName = CountryCodeUtil.getCountryName(countryCode)            
+            html.append("<div class='country-code-display'>${countryName}</div>")        
+        }
+        html.append("</div>")
+        html.append("<div class='current-time-display'>")
+        html.append("<span class='your-time'>")
+        html.append("<span class='time-24h'>${yourTime} (${yourTimezoneName})</span>")
+        html.append("<span class='time-12h' style='display: none;'>${yourTime12} (${yourTimezoneName})</span>")
+        html.append("</span>")
+        html.append("<span class='local-time' style='display: none;'>")
+        html.append("<span class='time-24h'>${cityTime} (${cityTimezoneName})</span>")
+        html.append("<span class='time-12h' style='display: none;'>${cityTime12} (${cityTimezoneName})</span>")
+        html.append("</span>")
+        html.append("</div>")
+        html.append("</div>")
+        
+        // Column 2: Temperature
+        html.append("<div class='temperature-column'>")
+        if (weatherData["Temperature"]) {
+            def tempValue = weatherData["Temperature"]
+            def metricValue = roundTemperatureInValue(tempValue)
+            def imperialValue = convertTemperatureInValueToImperial(tempValue)
+            
+            def metricMainTemp = extractMainTemperature(metricValue)
+            def metricFeelsLike = extractFeelsLikeTemperature(metricValue)
+            def imperialMainTemp = extractMainTemperature(imperialValue)
+            def imperialFeelsLike = extractFeelsLikeTemperature(imperialValue)
+            
+            html.append("<span class='metric-units'>")
+            html.append("<div class='temperature-display'>")
+            html.append("<div class='main-temperature'>${metricMainTemp}</div>")
+            html.append("<div class='feels-like-temperature'>${metricFeelsLike}</div>")
+            html.append("</div>")
+            html.append("</span>")
+            html.append("<span class='imperial-units' style='display: none;'>")
+            html.append("<div class='temperature-display'>")
+            html.append("<div class='main-temperature'>${imperialMainTemp}</div>")
+            html.append("<div class='feels-like-temperature'>${imperialFeelsLike}</div>")
+            html.append("</div>")
+            html.append("</span>")
+        }
+        html.append("</div>")
+        
+        // Column 3: Weather
+        html.append("<div class='weather-column'>")
+        if (weatherData["Weather"]) {
+            def weatherValue = weatherData["Weather"]
+            def descParts = weatherValue.split(" - ", 2)
+            def desc = descParts.length > 1 ? descParts[1] : weatherValue
+            def icon = getWeatherIcon(desc)
+            
+            html.append("<div class='weather-display'>")
+            html.append("<div class='weather-icon-large'>${icon}</div>")
+            html.append("<div class='weather-description'>${desc}</div>")
+            html.append("</div>")
+        }
+        html.append("</div>")
+        
+        html.append("</div>") // End top row
+        
+        // Bottom section: two columns for additional weather info
+        html.append("<div class='current-weather-bottom'>")
+        
+        // Left column
+        html.append("<div class='weather-details-left'>")
+        if (weatherData["Humidity"]) {
+            html.append("<div class='weather-detail'>")
+            html.append("<span class='detail-label'>Humidity:</span>")
+            html.append("<span class='detail-value'>${weatherData['Humidity']}</span>")
+            html.append("</div>")
+        }
+        if (weatherData["Pressure"]) {
+            html.append("<div class='weather-detail'>")
+            html.append("<span class='detail-label'>Pressure:</span>")
+            html.append("<span class='detail-value'>")
+            html.append("<span class='metric-units'>${weatherData['Pressure']}</span>")
+            html.append("<span class='imperial-units' style='display: none;'>${convertPropertyToImperial('Pressure', weatherData['Pressure'])}</span>")
+            html.append("</span>")
+            html.append("</div>")
+        }
+        html.append("</div>")
+        
+        // Right column
+        html.append("<div class='weather-details-right'>")
+        if (weatherData["Wind Speed"]) {
+            html.append("<div class='weather-detail'>")
+            html.append("<span class='detail-label'>Wind Speed:</span>")
+            html.append("<span class='detail-value'>")
+            html.append("<span class='metric-units'>${weatherData['Wind Speed']}</span>")
+            html.append("<span class='imperial-units' style='display: none;'>${convertPropertyToImperial('Wind Speed', weatherData['Wind Speed'])}</span>")
+            html.append("</span>")
+            html.append("</div>")
+        }
+        if (weatherData["Visibility"]) {
+            html.append("<div class='weather-detail'>")
+            html.append("<span class='detail-label'>Visibility:</span>")
+            html.append("<span class='detail-value'>")
+            html.append("<span class='metric-units'>${weatherData['Visibility']}</span>")
+            html.append("<span class='imperial-units' style='display: none;'>${convertPropertyToImperial('Visibility', weatherData['Visibility'])}</span>")
+            html.append("</span>")
+            html.append("</div>")
+        }
+        html.append("</div>")
+        
+        html.append("</div>") // End bottom row
+        html.append("</div>") // End container
     }
     
     return html.toString()
@@ -497,18 +644,18 @@ def formatDailyForecastTables(String result, TimeZone cityTimezone, String yourT
         } else if (line == "DAY_END") {
             // Day ended, continue to next
         } else if (line.contains(":") && currentDay != null) {
-            // Time entry: "09:00: 15.2°C, light rain"
-            def timePattern = /^(\d{2}:\d{2}):\s*(.+)$/
+            // Time entry: "1644321600: 15.2°C, light rain" (Unix timestamp)
+            def timePattern = /^(\d+):\s*(.+)$/
             def matcher = line =~ timePattern
             
             if (matcher) {
-                def timeStr = matcher[0][1]
+                def timestampStr = matcher[0][1]
                 def weatherInfo = matcher[0][2]
                 def tempAndDesc = weatherInfo.split(",", 2)
                 def tempRaw = tempAndDesc.length > 0 ? tempAndDesc[0].trim() : ""
                 def desc = tempAndDesc.length > 1 ? tempAndDesc[1].trim() : ""
                 
-                currentDay.forecasts << [time: timeStr, temp: tempRaw, description: desc]
+                currentDay.forecasts << [timestamp: Long.parseLong(timestampStr), temp: tempRaw, description: desc]
             }
         }
     }
@@ -533,10 +680,20 @@ def formatDailyForecastTables(String result, TimeZone cityTimezone, String yourT
         html.append("<table class='compact-forecast'>")
         
         day.forecasts.each { forecast ->
-            // Convert time and temperature
-            def localTimeStr = convertTimeToTimezone(forecast.time, cityTimezone)
-            def time12Your = convertTo12Hour(forecast.time)
-            def time12Local = convertTo12Hour(localTimeStr)
+            // Convert Unix timestamp to times in both timezones
+            def forecastDate = new Date(forecast.timestamp * 1000L)
+            
+            // Format time in user's timezone
+            def userFormat = new SimpleDateFormat("HH:mm")
+            userFormat.timeZone = TimeZone.getDefault()
+            def userTimeStr = userFormat.format(forecastDate)
+            def user12HourStr = convertTo12Hour(userTimeStr)
+            
+            // Format time in city's timezone
+            def cityFormat = new SimpleDateFormat("HH:mm")
+            cityFormat.timeZone = cityTimezone
+            def cityTimeStr = cityFormat.format(forecastDate)
+            def city12HourStr = convertTo12Hour(cityTimeStr)
             
             def tempMetric = roundTemperature(forecast.temp)
             def tempImperial = convertTemperatureToImperial(forecast.temp)
@@ -545,12 +702,12 @@ def formatDailyForecastTables(String result, TimeZone cityTimezone, String yourT
             html.append("<tr>")
             html.append("<td class='time-cell'>")
             html.append("<span class='your-time'>")
-            html.append("<span class='time-24h'>${forecast.time}</span>")
-            html.append("<span class='time-12h' style='display: none;'>${time12Your}</span>")
+            html.append("<span class='time-24h'>${userTimeStr}</span>")
+            html.append("<span class='time-12h' style='display: none;'>${user12HourStr}</span>")
             html.append("</span>")
             html.append("<span class='local-time' style='display: none;'>")
-            html.append("<span class='time-24h'>${localTimeStr}</span>")
-            html.append("<span class='time-12h' style='display: none;'>${time12Local}</span>")
+            html.append("<span class='time-24h'>${cityTimeStr}</span>")
+            html.append("<span class='time-12h' style='display: none;'>${city12HourStr}</span>")
             html.append("</span>")
             html.append("</td>")
             html.append("<td class='temp-cell'>")
@@ -767,6 +924,28 @@ def roundTemperatureInValue(String value) {
         return "${temp1}${unit1}${middleText}${temp2}${unit2}"
     }
     return value // Return original if pattern doesn't match
+}
+
+def extractMainTemperature(String value) {
+    // Extract just the main temperature from "22°C (feels like 23°C)" format
+    def pattern = /(\d+[°CF]+)/
+    def matcher = value =~ pattern
+    
+    if (matcher) {
+        return matcher[0][1]
+    }
+    return value
+}
+
+def extractFeelsLikeTemperature(String value) {
+    // Extract feels like temperature and format without parentheses
+    def pattern = /\(feels like\s*(\d+[°CF]+)\)/
+    def matcher = value =~ pattern
+    
+    if (matcher) {
+        return "feels like ${matcher[0][1]}"
+    }
+    return ""
 }
 
 server.start()

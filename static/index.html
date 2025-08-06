@@ -27,19 +27,14 @@
         </div>
     </div>
 
-    <h1 style="font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; font-weight: 700; font-size: 42px; text-align: center; margin: 20px 0 30px 0; background: linear-gradient(45deg, #ff6b6b, #4ecdc4, #45b7d1, #96ceb4, #feca57); background-size: 300% 300%; animation: gradientShift 4s ease infinite; -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; text-shadow: 0 4px 8px rgba(0,0,0,0.1); letter-spacing: 2px;">Volborg Weather</h1>
-    
-    <style>
-    @keyframes gradientShift {
-        0% { background-position: 0% 50%; }
-        50% { background-position: 100% 50%; }
-        100% { background-position: 0% 50%; }
-    }
-    </style>
+    <h1>Volborg Weather</h1>
     
     <form class="search-form" method="post">
         <div class="form-group">
-            <input type="text" name="city" value="{{CITY_VALUE}}" required placeholder="Enter city name">
+            <div class="input-container">
+                <input type="text" name="city" id="city-input" value="{{CITY_VALUE}}" required placeholder="Enter city name">
+                <button type="button" class="clear-button" onclick="clearInput()" title="Clear input">×</button>
+            </div>
             <input type="hidden" id="timezone-field" name="timezone" value="{{TIMEZONE_VALUE}}">
             <input type="hidden" id="units-field" name="units" value="{{UNITS_VALUE}}">
             <input type="hidden" id="timeformat-field" name="timeformat" value="{{TIMEFORMAT_VALUE}}">
@@ -49,10 +44,8 @@
     
     {{CITY_HEADER}}
     
-    {{CURRENT_WEATHER_HEADER}}
     {{CURRENT_WEATHER_CONTENT}}
     
-    {{FORECAST_HEADER}}
     {{FORECAST_CONTENT}}
     
     <script src="/static/script.js"></script>

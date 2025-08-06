@@ -104,3 +104,35 @@ document.addEventListener('DOMContentLoaded', function() {
     
     updateFormFields();
 });
+
+// Clear input function
+function clearInput() {
+    const cityInput = document.getElementById('city-input');
+    cityInput.value = '';
+    cityInput.focus();
+    toggleClearButton();
+}
+
+// Show/hide clear button based on input content
+function toggleClearButton() {
+    const cityInput = document.getElementById('city-input');
+    const clearButton = document.querySelector('.clear-button');
+    
+    if (cityInput.value.trim() === '') {
+        clearButton.style.opacity = '0';
+        clearButton.style.pointerEvents = 'none';
+    } else {
+        clearButton.style.opacity = '1';
+        clearButton.style.pointerEvents = 'auto';
+    }
+}
+
+// Add event listener for input changes when DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+    const cityInput = document.getElementById('city-input');
+    if (cityInput) {
+        cityInput.addEventListener('input', toggleClearButton);
+        // Initialize clear button visibility
+        toggleClearButton();
+    }
+});
