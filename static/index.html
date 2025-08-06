@@ -6,26 +6,36 @@
 </head>
 <body>
     <div class="toggle-section">
-        <div class="toggle-group">
-            <h3>Timezone:</h3>
-            <button id="your-btn" class="toggle-button active" onclick="toggleTimezone(false)">Your Timezone</button>
-            <button id="local-btn" class="toggle-button" onclick="toggleTimezone(true)">Local Timezone</button>
-        </div>
-        
-        <div class="toggle-group">
-            <h3>Units:</h3>
-            <button id="metric-btn" class="toggle-button active" onclick="toggleUnits(false)">Metric (°C)</button>
-            <button id="imperial-btn" class="toggle-button" onclick="toggleUnits(true)">Imperial (°F)</button>
-        </div>
-        
-        <div class="toggle-group">
-            <h3>Time Format:</h3>
-            <button id="time24-btn" class="toggle-button active" onclick="toggleTimeFormat(false)">24 Hour</button>
-            <button id="time12-btn" class="toggle-button" onclick="toggleTimeFormat(true)">12 Hour</button>
+        <div class="toggle-content">
+            <div class="toggle-group">
+                <h3>Timezone:</h3>
+                <button id="your-btn" class="toggle-button active" onclick="toggleTimezone(false)">Your Time</button>
+                <button id="local-btn" class="toggle-button" onclick="toggleTimezone(true)">Local Time</button>
+            </div>
+            
+            <div class="toggle-group">
+                <h3>Units:</h3>
+                <button id="metric-btn" class="toggle-button active" onclick="toggleUnits(false)">Metric (°C)</button>
+                <button id="imperial-btn" class="toggle-button" onclick="toggleUnits(true)">Imperial (°F)</button>
+            </div>
+            
+            <div class="toggle-group">
+                <h3>Time Format:</h3>
+                <button id="time24-btn" class="toggle-button active" onclick="toggleTimeFormat(false)">24 Hour</button>
+                <button id="time12-btn" class="toggle-button" onclick="toggleTimeFormat(true)">12 Hour</button>
+            </div>
         </div>
     </div>
 
-    <h1>Volborg Weather</h1>
+    <h1 style="font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; font-weight: 700; font-size: 42px; text-align: center; margin: 20px 0 30px 0; background: linear-gradient(45deg, #ff6b6b, #4ecdc4, #45b7d1, #96ceb4, #feca57); background-size: 300% 300%; animation: gradientShift 4s ease infinite; -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; text-shadow: 0 4px 8px rgba(0,0,0,0.1); letter-spacing: 2px;">Volborg Weather</h1>
+    
+    <style>
+    @keyframes gradientShift {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+    }
+    </style>
     
     <form class="search-form" method="post">
         <div class="form-group">
@@ -36,6 +46,8 @@
         </div>
         <button type="submit">Get Weather</button>
     </form>
+    
+    {{CITY_HEADER}}
     
     {{CURRENT_WEATHER_HEADER}}
     {{CURRENT_WEATHER_CONTENT}}
