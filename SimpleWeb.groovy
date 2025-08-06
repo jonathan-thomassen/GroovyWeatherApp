@@ -167,177 +167,101 @@ def context = new ServletContextHandler()
 context.contextPath = "/"
 server.handler = context
 
+// Add static file serving
 context.addServlet(new ServletHolder(new HttpServlet() {
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) {
-        resp.contentType = "text/html"
-        resp.writer.println("""
-            <html>
-            <head>
-                <title>Volborg Weather</title>
-                <style>
-                    body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
-                    .form-group { margin: 15px 0; }
-                    input, select, button { padding: 10px; margin: 5px; font-size: 16px; }
-                    button { background: #007cba; color: white; border: none; cursor: pointer; }
-                    button:hover { background: #005a87; }
-                </style>
-            </head>
-            <body>
-                <h1>Volborg Weather</h1>
-                <form method="post">
-                    <div class="form-group">
-                        <label>City:</label><br>
-                        <input type="text" name="city" required placeholder="Enter city name">
-                    </div>
-                    <div class="form-group">
-                        <label>Type:</label><br>
-                        <select name="type">
-                            <option value="current">Current Weather</option>
-                            <option value="forecast">5-Day Forecast</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Units:</label><br>
-                        <select name="units">
-                            <option value="metric">Metric (°C, m/s)</option>
-                            <option value="imperial">Imperial (°F, mph)</option>
-                        </select>
-                    </div>
-                    <button type="submit">Get Weather</button>
-                </form>
-            </body>
-            </html>
-        """)
+        def path = req.requestURI
+        if (path.startsWith("/static/")) {
+            def fileName = path.substring(8) // Remove "/static/" prefix
+            def file = new File("static/${fileName}")
+            
+            if (file.exists() && file.isFile()) {
+                if (fileName.endsWith(".css")) {
+                    resp.contentType = "text/css"
+                } else if (fileName.endsWith(".js")) {
+                    resp.contentType = "application/javascript"
+                } else if (fileName.endsWith(".html")) {
+                    resp.contentType = "text/html"
+                }
+                resp.writer.write(file.text)
+            } else {
+                resp.status = 404
+                resp.writer.write("File not found: ${fileName}")
+            }
+        } else {
+            resp.status = 404
+            resp.writer.write("Not found")
+        }
+    }
+}), "/static/*")
+
+// Function to read and process HTML template
+def loadHtmlTemplate(String city, String timezone, String units, String timeformat, String currentTableHtml, String forecastTableHtml) {
+    def templateFile = new File("static/index.html")
+    if (!templateFile.exists()) {
+        return "<html><body><h1>Template file not found</h1></body></html>"
+    }
+    
+    def template = templateFile.text
+    
+    // Replace placeholders
+    template = template.replace("{{CITY_VALUE}}", city ?: '')
+    template = template.replace("{{TIMEZONE_VALUE}}", timezone)
+    template = template.replace("{{UNITS_VALUE}}", units)
+    template = template.replace("{{TIMEFORMAT_VALUE}}", timeformat)
+    
+    // Add conditional headers and content
+    if (city && !city.trim().isEmpty()) {
+        template = template.replace("{{CURRENT_WEATHER_HEADER}}", '<h2>Current Weather</h2>')
+        template = template.replace("{{FORECAST_HEADER}}", '<h2>5-Day Forecast</h2>')
+    } else {
+        template = template.replace("{{CURRENT_WEATHER_HEADER}}", '')
+        template = template.replace("{{FORECAST_HEADER}}", '')
+    }
+    
+    template = template.replace("{{CURRENT_WEATHER_CONTENT}}", currentTableHtml)
+    template = template.replace("{{FORECAST_CONTENT}}", forecastTableHtml)
+    
+    return template
+}
+
+context.addServlet(new ServletHolder(new HttpServlet() {
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp) {
+        handleRequest(req, resp)
     }
     
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) {
+        handleRequest(req, resp)
+    }
+    
+    private void handleRequest(HttpServletRequest req, HttpServletResponse resp) {
         def city = req.getParameter("city")
-        def type = req.getParameter("type")
-        def useImperial = req.getParameter("units") == "imperial"
+        def timezone = req.getParameter("timezone") ?: "your"
+        def units = req.getParameter("units") ?: "metric"
+        def timeformat = req.getParameter("timeformat") ?: "24hour"
         
-        def weatherClient = new WeatherApiClient(apiKey, useImperial)
-        def result
-        def cityTimezone = null
+        def currentTableHtml = ""
+        def forecastTableHtml = ""
         
-        if (type == "forecast") {
-            result = weatherClient.getForecast(city)
-            cityTimezone = getCityTimezone(city, apiKey)
+        if (city && !city.trim().isEmpty()) {
+            // Always fetch weather data in metric units - conversion handled client-side
+            def weatherClient = new WeatherApiClient(apiKey, false) // Always use metric
+            def currentResult = weatherClient.getCurrentWeather(city)
+            def forecastResult = weatherClient.getForecast(city)
+            def cityTimezone = getCityTimezone(city, apiKey)
+            
+            // Parse both results to create table HTML - always pass false for useImperial
+            currentTableHtml = formatResultAsTable(currentResult, "current", cityTimezone, false)
+            forecastTableHtml = formatResultAsTable(forecastResult, "forecast", cityTimezone, false)
         } else {
-            result = weatherClient.getCurrentWeather(city)
-            cityTimezone = getCityTimezone(city, apiKey)
+            // Hide content when no city is provided
+            currentTableHtml = ""
+            forecastTableHtml = ""
         }
         
-        // Parse the result to create table HTML
-        def tableHtml = formatResultAsTable(result, type, cityTimezone, useImperial)
-        
         resp.contentType = "text/html"
-        resp.writer.println("""
-            <html>
-            <head>
-                <title>Volborg Weather</title>
-                <style>
-                    body { font-family: Arial, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; }
-                    h1 { color: #333; }
-                    table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-                    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
-                    th { background-color: #007cba; color: white; }
-                    tr:hover { background-color: #f5f5f5; }
-                    .forecast-date { background-color: #e6f3ff; font-weight: bold; }
-                    a { color: #007cba; text-decoration: none; padding: 10px 15px; background: #f0f0f0; border-radius: 5px; display: inline-block; margin-top: 20px; }
-                    a:hover { text-decoration: underline; background: #e0e0e0; }
-                    .error { color: red; background: #ffe6e6; padding: 15px; border-radius: 5px; }
-                    .toggle-section { margin: 20px 0; padding: 15px; background: #f8f9fa; border-radius: 8px; }
-                    .toggle-group { margin: 10px 0; }
-                    .toggle-button { background: #007cba; color: white; border: none; padding: 8px 16px; margin: 0 5px; cursor: pointer; border-radius: 4px; }
-                    .toggle-button.active { background: #005a87; }
-                    .toggle-button:hover { background: #005a87; }
-                    h3 { margin: 5px 0; }
-                </style>
-                <script>
-                    function toggleTimezone(showLocal) {
-                        const localElements = document.querySelectorAll('.local-time');
-                        const yourElements = document.querySelectorAll('.your-time');
-                        const localBtn = document.getElementById('local-btn');
-                        const yourBtn = document.getElementById('your-btn');
-                        
-                        if (showLocal) {
-                            localElements.forEach(el => el.style.display = 'inline');
-                            yourElements.forEach(el => el.style.display = 'none');
-                            localBtn.classList.add('active');
-                            yourBtn.classList.remove('active');
-                        } else {
-                            localElements.forEach(el => el.style.display = 'none');
-                            yourElements.forEach(el => el.style.display = 'inline');
-                            yourBtn.classList.add('active');
-                            localBtn.classList.remove('active');
-                        }
-                    }
-                    
-                    function toggleUnits(useImperial) {
-                        const metricElements = document.querySelectorAll('.metric-units');
-                        const imperialElements = document.querySelectorAll('.imperial-units');
-                        const metricBtn = document.getElementById('metric-btn');
-                        const imperialBtn = document.getElementById('imperial-btn');
-                        
-                        if (useImperial) {
-                            imperialElements.forEach(el => el.style.display = 'inline');
-                            metricElements.forEach(el => el.style.display = 'none');
-                            imperialBtn.classList.add('active');
-                            metricBtn.classList.remove('active');
-                        } else {
-                            metricElements.forEach(el => el.style.display = 'inline');
-                            imperialElements.forEach(el => el.style.display = 'none');
-                            metricBtn.classList.add('active');
-                            imperialBtn.classList.remove('active');
-                        }
-                    }
-                    
-                    function toggleTimeFormat(use12Hour) {
-                        const time24Elements = document.querySelectorAll('.time-24h');
-                        const time12Elements = document.querySelectorAll('.time-12h');
-                        const time24Btn = document.getElementById('time24-btn');
-                        const time12Btn = document.getElementById('time12-btn');
-                        
-                        if (use12Hour) {
-                            time12Elements.forEach(el => el.style.display = 'inline');
-                            time24Elements.forEach(el => el.style.display = 'none');
-                            time12Btn.classList.add('active');
-                            time24Btn.classList.remove('active');
-                        } else {
-                            time24Elements.forEach(el => el.style.display = 'inline');
-                            time12Elements.forEach(el => el.style.display = 'none');
-                            time24Btn.classList.add('active');
-                            time12Btn.classList.remove('active');
-                        }
-                    }
-                </script>
-            </head>
-            <body>
-                <h1>Volborg Weather</h1>
-                <div class="toggle-section">
-                    <div class="toggle-group">
-                        <h3>Timezone:</h3>
-                        <button id="your-btn" class="toggle-button active" onclick="toggleTimezone(false)">Your Timezone</button>
-                        <button id="local-btn" class="toggle-button" onclick="toggleTimezone(true)">Local Timezone</button>
-                    </div>
-                    
-                    <div class="toggle-group">
-                        <h3>Units:</h3>
-                        <button id="metric-btn" class="toggle-button ${useImperial ? '' : 'active'}" onclick="toggleUnits(false)">Metric (°C)</button>
-                        <button id="imperial-btn" class="toggle-button ${useImperial ? 'active' : ''}" onclick="toggleUnits(true)">Imperial (°F)</button>
-                    </div>
-                    
-                    <div class="toggle-group">
-                        <h3>Time Format:</h3>
-                        <button id="time24-btn" class="toggle-button active" onclick="toggleTimeFormat(false)">24 Hour</button>
-                        <button id="time12-btn" class="toggle-button" onclick="toggleTimeFormat(true)">12 Hour</button>
-                    </div>
-                </div>
-                ${tableHtml}
-                <a href="/">← Back to search</a>
-            </body>
-            </html>
-        """)
+        def htmlContent = loadHtmlTemplate(city, timezone, units, timeformat, currentTableHtml, forecastTableHtml)
+        resp.writer.println(htmlContent)
     }
 }), "/*")
 
@@ -449,9 +373,9 @@ def formatResultAsTable(String result, String type, TimeZone cityTimezone, boole
                     def time12Your = convertTo12Hour(timeStr)
                     def time12Local = convertTo12Hour(localTimeStr)
                     
-                    // Convert temperature units
+                    // Convert temperature units - generate both metric and imperial
                     def tempMetric = roundTemperature(tempRaw)
-                    def tempImperial = convertTemperatureDisplay(tempRaw, true)
+                    def tempImperial = convertTemperatureToImperial(tempRaw)
                     
                     // Convert description to weather icon
                     def weatherIcon = getWeatherIcon(desc)
@@ -470,8 +394,8 @@ def formatResultAsTable(String result, String type, TimeZone cityTimezone, boole
                     html.append("</span>")
                     html.append("</td>")
                     html.append("<td>")
-                    html.append("<span class='metric-units' style='display: ${useImperial ? 'none' : 'inline'};'>${tempMetric}</span>")
-                    html.append("<span class='imperial-units' style='display: ${useImperial ? 'inline' : 'none'};'>${tempImperial}</span>")
+                    html.append("<span class='metric-units'>${tempMetric}</span>")
+                    html.append("<span class='imperial-units' style='display: none;'>${tempImperial}</span>")
                     html.append("</td>")
                     html.append("<td style='font-size: 24px; text-align: center;'>${weatherIcon}</td>")
                     html.append("</tr>")
@@ -505,28 +429,42 @@ def formatResultAsTable(String result, String type, TimeZone cityTimezone, boole
                     // Handle temperature with unit conversion
                     if (property == "Temperature") {
                         def metricValue = roundTemperatureInValue(value)
-                        def imperialValue = convertTemperatureInValue(value)
+                        def imperialValue = convertTemperatureInValueToImperial(value)
                         
                         html.append("<tr>")
                         html.append("<td>${property}</td>")
                         html.append("<td>")
-                        html.append("<span class='metric-units' style='display: ${useImperial ? 'none' : 'inline'};'>${metricValue}</span>")
-                        html.append("<span class='imperial-units' style='display: ${useImperial ? 'inline' : 'none'};'>${imperialValue}</span>")
+                        html.append("<span class='metric-units'>${metricValue}</span>")
+                        html.append("<span class='imperial-units' style='display: none;'>${imperialValue}</span>")
                         html.append("</td>")
                         html.append("</tr>")
                     } else {
-                        // Convert weather descriptions to icons
-                        if (property == "Weather") {
-                            def descParts = value.split(" - ", 2)
-                            def desc = descParts.length > 1 ? descParts[1] : value
-                            def icon = getWeatherIcon(desc)
-                            value = "${icon} ${value}"
+                        // Handle other properties that may have units
+                        if (property == "Pressure" || property == "Wind Speed" || property == "Visibility") {
+                            def metricValue = value
+                            def imperialValue = convertPropertyToImperial(property, value)
+                            
+                            html.append("<tr>")
+                            html.append("<td>${property}</td>")
+                            html.append("<td>")
+                            html.append("<span class='metric-units'>${metricValue}</span>")
+                            html.append("<span class='imperial-units' style='display: none;'>${imperialValue}</span>")
+                            html.append("</td>")
+                            html.append("</tr>")
+                        } else {
+                            // Convert weather descriptions to icons
+                            if (property == "Weather") {
+                                def descParts = value.split(" - ", 2)
+                                def desc = descParts.length > 1 ? descParts[1] : value
+                                def icon = getWeatherIcon(desc)
+                                value = "${icon} ${value}"
+                            }
+                            
+                            html.append("<tr>")
+                            html.append("<td>${property}</td>")
+                            html.append("<td>${value}</td>")
+                            html.append("</tr>")
                         }
-                        
-                        html.append("<tr>")
-                        html.append("<td>${property}</td>")
-                        html.append("<td>${value}</td>")
-                        html.append("</tr>")
                     }
                 }
             }
@@ -547,6 +485,83 @@ def convertTo12Hour(String time24) {
     } catch (Exception e) {
         return time24
     }
+}
+
+def convertTemperatureToImperial(String tempStr) {
+    def pattern = /(\d+\.?\d*)([°CF]+)/
+    def matcher = tempStr =~ pattern
+    
+    if (matcher) {
+        def temp = Double.parseDouble(matcher[0][1])
+        def unit = matcher[0][2]
+        
+        if (unit.contains("C")) {
+            // Convert Celsius to Fahrenheit
+            def fahrenheit = (temp * 9/5) + 32
+            return "${Math.round(fahrenheit)}°F"
+        }
+    }
+    return tempStr // Return original if no conversion needed or already Fahrenheit
+}
+
+def convertTemperatureInValueToImperial(String value) {
+    // Handle "22°C (feels like 23°C)" format and convert to Fahrenheit
+    def pattern = /(\d+\.?\d*)([°CF]+)(\s*\(feels like\s*)(\d+\.?\d*)([°CF]+\))/
+    def matcher = value =~ pattern
+    
+    if (matcher) {
+        def temp1 = Double.parseDouble(matcher[0][1])
+        def unit1 = matcher[0][2]
+        def middleText = matcher[0][3]
+        def temp2 = Double.parseDouble(matcher[0][4])
+        def unit2 = matcher[0][5]
+        
+        if (unit1.contains("C")) {
+            // Convert to Fahrenheit
+            def fahrenheit1 = Math.round((temp1 * 9/5) + 32)
+            def fahrenheit2 = Math.round((temp2 * 9/5) + 32)
+            return "${fahrenheit1}°F${middleText}${fahrenheit2}°F)"
+        }
+    }
+    return value // Return original if no conversion needed
+}
+
+def convertPropertyToImperial(String property, String value) {
+    switch (property) {
+        case "Pressure":
+            // Convert hPa to psi
+            def pattern = /(\d+\.?\d*)\s*hPa/
+            def matcher = value =~ pattern
+            if (matcher) {
+                def pressure = Double.parseDouble(matcher[0][1])
+                def psi = Math.round(pressure * 0.0145038 * 100) / 100
+                return "${psi} psi"
+            }
+            break
+            
+        case "Wind Speed":
+            // Convert m/s to mph
+            def pattern = /(\d+\.?\d*)\s*m\/s/
+            def matcher = value =~ pattern
+            if (matcher) {
+                def speed = Double.parseDouble(matcher[0][1])
+                def mph = Math.round(speed * 2.237 * 10) / 10
+                return "${mph} mph"
+            }
+            break
+            
+        case "Visibility":
+            // Convert km to miles
+            def pattern = /(\d+\.?\d*)\s*km/
+            def matcher = value =~ pattern
+            if (matcher) {
+                def distance = Double.parseDouble(matcher[0][1])
+                def miles = Math.round(distance * 0.621371 * 100) / 100
+                return "${miles} miles"
+            }
+            break
+    }
+    return value // Return original if no conversion needed
 }
 
 def convertTemperatureDisplay(String tempStr, boolean toImperial) {

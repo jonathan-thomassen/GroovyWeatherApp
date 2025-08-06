@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Volborg Weather</title>
+    <link rel="stylesheet" type="text/css" href="/static/styles.css">
+</head>
+<body>
+    <div class="toggle-section">
+        <div class="toggle-group">
+            <h3>Timezone:</h3>
+            <button id="your-btn" class="toggle-button active" onclick="toggleTimezone(false)">Your Timezone</button>
+            <button id="local-btn" class="toggle-button" onclick="toggleTimezone(true)">Local Timezone</button>
+        </div>
+        
+        <div class="toggle-group">
+            <h3>Units:</h3>
+            <button id="metric-btn" class="toggle-button active" onclick="toggleUnits(false)">Metric (°C)</button>
+            <button id="imperial-btn" class="toggle-button" onclick="toggleUnits(true)">Imperial (°F)</button>
+        </div>
+        
+        <div class="toggle-group">
+            <h3>Time Format:</h3>
+            <button id="time24-btn" class="toggle-button active" onclick="toggleTimeFormat(false)">24 Hour</button>
+            <button id="time12-btn" class="toggle-button" onclick="toggleTimeFormat(true)">12 Hour</button>
+        </div>
+    </div>
+
+    <h1>Volborg Weather</h1>
+    
+    <form class="search-form" method="post">
+        <div class="form-group">
+            <input type="text" name="city" value="{{CITY_VALUE}}" required placeholder="Enter city name">
+            <input type="hidden" id="timezone-field" name="timezone" value="{{TIMEZONE_VALUE}}">
+            <input type="hidden" id="units-field" name="units" value="{{UNITS_VALUE}}">
+            <input type="hidden" id="timeformat-field" name="timeformat" value="{{TIMEFORMAT_VALUE}}">
+        </div>
+        <button type="submit">Get Weather</button>
+    </form>
+    
+    {{CURRENT_WEATHER_HEADER}}
+    {{CURRENT_WEATHER_CONTENT}}
+    
+    {{FORECAST_HEADER}}
+    {{FORECAST_CONTENT}}
+    
+    <script src="/static/script.js"></script>
+</body>
+</html>
