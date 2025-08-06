@@ -619,8 +619,11 @@ function selectCity(city) {
     hideAutocomplete();
     toggleClearButton();
     
-    // Optional: automatically submit the form
-    // document.querySelector('.search-form').submit();
+    // Automatically submit the form when a city is selected
+    const form = document.querySelector('.search-form') || document.querySelector('form');
+    if (form) {
+        form.submit();
+    }
 }
 
 function showAutocomplete() {
