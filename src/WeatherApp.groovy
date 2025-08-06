@@ -9,6 +9,7 @@ import org.eclipse.jetty.servlet.ServletContextHandler
 import org.eclipse.jetty.servlet.ServletHolder
 import javax.servlet.http.*
 import groovy.json.JsonSlurper
+import groovy.json.JsonBuilder
 import org.apache.http.client.methods.HttpGet
 import org.apache.http.impl.client.HttpClients
 import org.apache.http.util.EntityUtils
@@ -490,6 +491,7 @@ class WeatherWebServer {
         server.handler = context
 
         context.addServlet(new ServletHolder(createStaticFileServlet()), "/static/*")
+        context.addServlet(new ServletHolder(createApiServlet()), "/api/*")
         context.addServlet(new ServletHolder(createMainServlet()), "/*")
 
         server.start()
@@ -524,6 +526,72 @@ class WeatherWebServer {
                 } else {
                     resp.status = 404
                     resp.writer.write("Not found")
+                }
+            }
+        }
+    }
+    
+    private HttpServlet createApiServlet() {
+        return new HttpServlet() {
+            protected void doGet(HttpServletRequest req, HttpServletResponse resp) {
+                def path = req.requestURI
+                
+                if (path.startsWith("/api/cities")) {
+                    handleCitySuggestions(req, resp)
+                } else {
+                    resp.status = 404
+                    resp.writer.write("API endpoint not found")
+                }
+            }
+            
+            private void handleCitySuggestions(HttpServletRequest req, HttpServletResponse resp) {
+                def query = req.getParameter("q")
+                
+                if (!query || query.trim().length() < 2) {
+                    resp.contentType = "application/json"
+                    resp.writer.write("[]")
+                    return
+                }
+                
+                def httpClient = HttpClients.createDefault()
+                try {
+                    def encodedQuery = URLEncoder.encode(query.trim(), "UTF-8")
+                    def url = "http://api.openweathermap.org/geo/1.0/direct?q=${encodedQuery}&limit=10&appid=${apiKey}"
+                    
+                    def httpGet = new HttpGet(url)
+                    def response = httpClient.execute(httpGet)
+                    def responseBody = EntityUtils.toString(response.entity)
+                    
+                    if (response.statusLine.statusCode == 200) {
+                        def jsonSlurper = new JsonSlurper()
+                        def cities = jsonSlurper.parseText(responseBody)
+                        
+                        // Transform the response to our format
+                        def suggestions = cities.collect { city ->
+                            def countryName = CountryCodeUtil.getCountryName(city.country) ?: city.country
+                            [
+                                name: city.name,
+                                country: city.country,
+                                display: "${city.name}, ${countryName}",
+                                searchValue: "${city.name}, ${city.country}",
+                                lat: city.lat,
+                                lon: city.lon
+                            ]
+                        }
+                        
+                        resp.contentType = "application/json"
+                        resp.writer.write(new JsonBuilder(suggestions).toString())
+                    } else {
+                        resp.status = 500
+                        resp.writer.write("[]")
+                    }
+                    
+                } catch (Exception e) {
+                    println "Error fetching city suggestions: ${e.message}"
+                    resp.status = 500
+                    resp.writer.write("[]")
+                } finally {
+                    httpClient.close()
                 }
             }
         }

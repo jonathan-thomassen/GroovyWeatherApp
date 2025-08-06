@@ -129,6 +129,81 @@ input {
     transform: translateY(-50%) scale(1.1);
 }
 
+/* Autocomplete dropdown styling */
+.autocomplete-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: linear-gradient(145deg, #ffffff, #f8f9fa);
+    border: 1px solid #e1e8ed;
+    border-top: none;
+    border-radius: 0 0 12px 12px;
+    max-height: 250px;
+    overflow-y: auto;
+    z-index: 1000;
+    display: none;
+    box-shadow: 0 6px 20px rgba(0, 124, 186, 0.15);
+    transition: all 0.3s ease;
+}
+
+.autocomplete-dropdown.show {
+    display: block;
+}
+
+.autocomplete-item {
+    padding: 12px 16px;
+    cursor: pointer;
+    border-bottom: 1px solid #f0f4f7;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+}
+
+.autocomplete-item:hover,
+.autocomplete-item.selected {
+    background: linear-gradient(145deg, rgba(0, 124, 186, 0.1), rgba(0, 124, 186, 0.05));
+    transform: translateX(2px);
+}
+
+.autocomplete-item:last-child {
+    border-bottom: none;
+    border-radius: 0 0 12px 12px;
+}
+
+.autocomplete-item .city-name {
+    font-weight: 500;
+    color: #2c3e50;
+    flex: 1;
+}
+
+.autocomplete-item .country-info {
+    font-size: 12px;
+    color: #666;
+    background: rgba(0, 124, 186, 0.1);
+    padding: 2px 8px;
+    border-radius: 8px;
+    font-weight: 500;
+}
+
+.autocomplete-loading {
+    padding: 12px 16px;
+    text-align: center;
+    color: #666;
+    font-style: italic;
+    font-size: 14px;
+}
+
+.autocomplete-no-results {
+    padding: 12px 16px;
+    text-align: center;
+    color: #999;
+    font-style: italic;
+    font-size: 14px;
+}
+
 input:focus {
     border-color: #007cba;
     background: linear-gradient(145deg, #ffffff, #fafbfc);
