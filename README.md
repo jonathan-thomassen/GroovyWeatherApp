@@ -11,11 +11,14 @@ A modern, intelligent weather application built with Groovy and Jetty, featuring
 - **Time Format Options**: 24-hour or 12-hour time display
 
 ### Smart User Interface
-- **Intelligent Auto-Completion**: Advanced fuzzy matching with multiple algorithms
-  - Levenshtein distance for typo tolerance
-  - Jaro-Winkler similarity for partial matches
-  - N-gram analysis for substring recognition
-  - Real-time API integration with OpenWeatherMap geocoding
+- **Google Places Auto-Completion**: Premium city search powered by Google Places API
+  - **Comprehensive Coverage**: Access to Google's global database of cities
+  - **Smart Query Processing**: Handles various input formats and typos
+  - **Real-time Suggestions**: Fast, accurate results with minimal API calls
+  - **City-Only Filter**: Restricted to cities using `includedPrimaryTypes: "(cities)"`
+  - **US State Code Support**: Search with state codes (Austin,TX) or full names (Austin,Texas)
+  - **Intelligent Caching**: 5-minute cache reduces redundant API calls
+  - **Progressive Fallback**: Essential cities backup when API unavailable
   - One-click form submission from suggestions
 - **Beautiful Animated Header**: Dynamic gradient background with color transitions
 - **Enhanced Input Field**: Clear button (×) with smart visibility
@@ -37,9 +40,10 @@ GroovyWeatherApp/
 ├── static/
 │   ├── index.html                   # Main HTML template
 │   ├── styles.css                   # Complete CSS styling (900+ lines)
-│   └── script.js                    # Advanced JavaScript with auto-completion
+│   └── script.js                    # Advanced JavaScript with Google Places integration
 ├── IsoCountryCodes.csv              # Country code to name mappings
 ├── key                              # OpenWeatherMap API key
+├── google-key                       # Google Places API key
 └── README.md                        # This documentation
 ```
 
@@ -49,20 +53,33 @@ GroovyWeatherApp/
 - **Java 8 or higher**
 - **Groovy 3.0 or higher**
 - **OpenWeatherMap API key** (free account available)
+- **Google Places API key** (Google Cloud Platform account required)
 
 ### Installation
 
 1. **Clone or download** the project to your local machine
 
-2. **Get an API key** from [OpenWeatherMap](https://openweathermap.org/api)
-   - Sign up for a free account
-   - Generate an API key from your dashboard
+2. **Get API keys**:
+   - **OpenWeatherMap**: Get a free API key from [OpenWeatherMap](https://openweathermap.org/api)
+   - **Google Places**: Get an API key from [Google Cloud Console](https://console.cloud.google.com/)
+     - Enable the **Places API (New)**
+     - Create credentials (API key)
+     - Optionally restrict the key to Places API for security
 
-3. **Create the API key file**:
+3. **Create the API key files**:
+   
+   **Option 1: Separate files (recommended)**
    ```bash
-   echo "your_api_key_here" > key
+   echo "your_openweather_api_key" > key
+   echo "your_google_places_api_key" > google-key
    ```
-   *Replace `your_api_key_here` with your actual API key*
+   
+   **Option 2: Single file (two lines)**
+   ```bash
+   echo -e "your_openweather_api_key\nyour_google_places_api_key" > key
+   ```
+   
+   *Replace the placeholders with your actual API keys*
 
 4. **Verify the CSV file exists**:
    - Ensure `IsoCountryCodes.csv` is in the root directory
@@ -91,8 +108,18 @@ You should see: `Server started at http://localhost:8080`
 - **Type partial city names**: "Copen" → suggests "Copenhagen"
 - **Handle typos**: "Berln" → suggests "Berlin"  
 - **Use abbreviations**: "SF" → suggests "San Francisco"
+- **US State codes**: "Austin,TX" → suggests "Austin, Texas"
+- **State disambiguation**: "Portland,OR" vs "Portland,ME" for different states
+- **Flexible state formats**: "Austin TX", "Austin,Texas", or "Austin,TX" all work
 - **Get instant results**: Click any suggestion to immediately load weather
 - **Keyboard navigation**: Use ↑↓ arrows and Enter key
+
+#### US State Code Examples
+- `Austin,TX` → Austin, Texas
+- `Portland,OR` → Portland, Oregon  
+- `Springfield,IL` → Springfield, Illinois
+- `Columbus,OH` → Columbus, Ohio
+- `Austin TX` → Austin, Texas (space-separated also works)
 
 ### Display Customization
 - **🌍 Timezone Toggle**: Switch between your local time and city's local time
@@ -194,7 +221,3 @@ The application makes 2 API calls per weather request (current + forecast).
 ## 📄 License
 
 This project is open source. Feel free to use and modify as needed.
-
----
-
-**Note**: This is the refactored version with improved code organization. The original `SimpleWeb.groovy` file is maintained for compatibility but the new modular structure in the `src/` directory is recommended for development and maintenance.

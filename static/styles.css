@@ -141,14 +141,13 @@ input {
     border-radius: 0 0 12px 12px;
     max-height: 200px;
     overflow-y: auto;
-    z-index: 1000;
     display: none;
     box-shadow: 0 6px 20px rgba(0, 124, 186, 0.15);
     transition: all 0.3s ease;
 }
 
 .autocomplete-dropdown.show {
-    display: block;
+    display: block;    
 }
 
 .autocomplete-item {
@@ -304,6 +303,7 @@ a:hover {
     align-items: flex-start;
     gap: 15px;
     transition: all 0.3s ease;
+    z-index: 1;
 }
 
 .error:hover {
@@ -822,8 +822,8 @@ h3 {
 }
 
 .weather-column .weather-icon-large {
-    font-size: 80px;
-    line-height: 0.8;
+    font-size: 70px;
+    line-height: 1.0;
 }
 
 .weather-column .weather-description {

@@ -11,6 +11,8 @@ import javax.servlet.http.*
 import groovy.json.JsonSlurper
 import groovy.json.JsonBuilder
 import org.apache.http.client.methods.HttpGet
+import org.apache.http.client.methods.HttpPost
+import org.apache.http.entity.StringEntity
 import org.apache.http.impl.client.HttpClients
 import org.apache.http.util.EntityUtils
 import java.net.URLEncoder
@@ -70,6 +72,115 @@ class CountryCodeUtil {
         
         def countryName = countryCodeMap[countryCode.toUpperCase()]
         return countryName ?: countryCode // Return original code if not found
+    }
+}
+
+/**
+ * US State Code Utility for converting state names/abbreviations to ISO 3166-2:US codes
+ */
+class USStateCodeUtil {
+    private static Map<String, String> stateCodeMap = [:]
+    private static Map<String, String> stateNameMap = [:]
+    
+    static {
+        loadStateCodes()
+    }
+    
+    private static void loadStateCodes() {
+        def stateCodes = [
+            'AL': 'Alabama', 'AK': 'Alaska', 'AZ': 'Arizona', 'AR': 'Arkansas',
+            'CA': 'California', 'CO': 'Colorado', 'CT': 'Connecticut', 'DE': 'Delaware',
+            'FL': 'Florida', 'GA': 'Georgia', 'HI': 'Hawaii', 'ID': 'Idaho',
+            'IL': 'Illinois', 'IN': 'Indiana', 'IA': 'Iowa', 'KS': 'Kansas',
+            'KY': 'Kentucky', 'LA': 'Louisiana', 'ME': 'Maine', 'MD': 'Maryland',
+            'MA': 'Massachusetts', 'MI': 'Michigan', 'MN': 'Minnesota', 'MS': 'Mississippi',
+            'MO': 'Missouri', 'MT': 'Montana', 'NE': 'Nebraska', 'NV': 'Nevada',
+            'NH': 'New Hampshire', 'NJ': 'New Jersey', 'NM': 'New Mexico', 'NY': 'New York',
+            'NC': 'North Carolina', 'ND': 'North Dakota', 'OH': 'Ohio', 'OK': 'Oklahoma',
+            'OR': 'Oregon', 'PA': 'Pennsylvania', 'RI': 'Rhode Island', 'SC': 'South Carolina',
+            'SD': 'South Dakota', 'TN': 'Tennessee', 'TX': 'Texas', 'UT': 'Utah',
+            'VT': 'Vermont', 'VA': 'Virginia', 'WA': 'Washington', 'WV': 'West Virginia',
+            'WI': 'Wisconsin', 'WY': 'Wyoming', 'DC': 'District of Columbia'
+        ]
+        
+        // Create both code->name and name->code mappings
+        stateCodes.each { code, name ->
+            stateCodeMap[code] = name
+            stateNameMap[name.toLowerCase()] = code
+        }
+        
+        println "Loaded ${stateCodeMap.size()} US state codes"
+    }
+    
+    static String getStateName(String stateCode) {
+        if (!stateCode || stateCode.trim().isEmpty()) {
+            return ""
+        }
+        return stateCodeMap[stateCode.toUpperCase()] ?: stateCode
+    }
+    
+    static String getStateCode(String stateName) {
+        if (!stateName || stateName.trim().isEmpty()) {
+            return ""
+        }
+        return stateNameMap[stateName.toLowerCase().trim()] ?: ""
+    }
+    
+    static boolean isValidStateCode(String stateCode) {
+        return stateCode && stateCodeMap.containsKey(stateCode.toUpperCase())
+    }
+    
+    static boolean isValidStateName(String stateName) {
+        return stateName && stateNameMap.containsKey(stateName.toLowerCase().trim())
+    }
+    
+    static String formatCityState(String city, String state) {
+        if (!state || state.trim().isEmpty()) {
+            return city
+        }
+        
+        def stateCode = state.length() == 2 ? state.toUpperCase() : getStateCode(state)
+        if (stateCode) {
+            return "${city},${stateCode}"
+        }
+        return city
+    }
+    
+    static Map<String, String> parseLocationQuery(String query) {
+        def result = [city: query, state: "", country: ""]
+        
+        if (query.contains(',')) {
+            def parts = query.split(',').collect { it.trim() }
+            
+            if (parts.size() >= 2) {
+                result.city = parts[0]
+                def secondPart = parts[1]
+                
+                // Check if second part is a US state code or name
+                if (isValidStateCode(secondPart) || isValidStateName(secondPart)) {
+                    result.state = secondPart
+                    result.country = "US"
+                    
+                    // If there's a third part, it might be country
+                    if (parts.size() >= 3) {
+                        result.country = parts[2]
+                    }
+                } else {
+                    // Assume it's a country code
+                    result.country = secondPart
+                    
+                    // If there's a third part, it might be state (city,country,state format)
+                    if (parts.size() >= 3 && result.country.toUpperCase() == "US") {
+                        def thirdPart = parts[2]
+                        if (isValidStateCode(thirdPart) || isValidStateName(thirdPart)) {
+                            result.state = thirdPart
+                        }
+                    }
+                }
+            }
+        }
+        
+        return result
     }
 }
 
@@ -333,11 +444,67 @@ class WeatherApiClient {
         this.apiKey = apiKey
     }
     
-    def getCurrentWeather(String city) {
+    /**
+     * Get coordinates for a city using OpenWeatherMap geocoding
+     * This is used for weather lookups after city selection from Google Places
+     */
+    private def getCityCoordinates(String city) {
         def httpClient = HttpClients.createDefault()
         try {
-            def encodedCity = URLEncoder.encode(city, "UTF-8")
-            def url = "${baseUrl}/weather?q=${encodedCity}&appid=${apiKey}&units=metric"
+            // Parse location query to handle state codes
+            def locationInfo = USStateCodeUtil.parseLocationQuery(city)
+            
+            // Build the geocoding query with proper state code format
+            def geocodingQuery = locationInfo.city
+            if (locationInfo.state && locationInfo.country == "US") {
+                def stateCode = locationInfo.state.length() == 2 ? 
+                    locationInfo.state.toUpperCase() : 
+                    USStateCodeUtil.getStateCode(locationInfo.state)
+                if (stateCode) {
+                    geocodingQuery = "${locationInfo.city},${stateCode},${locationInfo.country}"
+                }
+            } else if (locationInfo.country && locationInfo.country != "US") {
+                geocodingQuery = "${locationInfo.city},${locationInfo.country}"
+            }
+            
+            def httpGet = new HttpGet(url)
+            def response = httpClient.execute(httpGet)
+            def responseBody = EntityUtils.toString(response.entity)
+            
+            if (response.statusLine.statusCode == 200) {
+                def geocodingData = jsonSlurper.parseText(responseBody)
+                if (geocodingData && geocodingData.size() > 0) {
+                    def location = geocodingData[0]
+                    return [
+                        lat: location.lat, 
+                        lon: location.lon,
+                        name: location.name,
+                        country: location.country,
+                        state: location.state ?: ""
+                    ]
+                }
+            }
+            
+            return null
+            
+        } catch (Exception e) {
+            println "Error getting coordinates for ${city}: ${e.message}"
+            return null
+        } finally {
+            httpClient.close()
+        }
+    }
+    
+    def getCurrentWeather(String city) {
+        // First, get coordinates for the city
+        def coordinates = getCityCoordinates(city)
+        if (!coordinates) {
+            return "CITY_NOT_FOUND: We couldn't find coordinates for '${city}'. Please check the city name and try again."
+        }
+        
+        def httpClient = HttpClients.createDefault()
+        try {
+            def url = "${baseUrl}/weather?lat=${coordinates.lat}&lon=${coordinates.lon}&appid=${apiKey}&units=metric"
             
             def httpGet = new HttpGet(url)
             def response = httpClient.execute(httpGet)
@@ -345,7 +512,7 @@ class WeatherApiClient {
             
             if (response.statusLine.statusCode == 200) {
                 def weatherData = jsonSlurper.parseText(responseBody)
-                return formatCurrentWeather(weatherData)
+                return formatCurrentWeather(weatherData, coordinates)
             } else {
                 return handleApiError(response.statusLine.statusCode, city)
             }
@@ -358,10 +525,15 @@ class WeatherApiClient {
     }
     
     def getForecast(String city) {
+        // First, get coordinates for the city
+        def coordinates = getCityCoordinates(city)
+        if (!coordinates) {
+            return "CITY_NOT_FOUND: We couldn't find coordinates for '${city}'. Please check the city name and try again."
+        }
+        
         def httpClient = HttpClients.createDefault()
         try {
-            def encodedCity = URLEncoder.encode(city, "UTF-8")
-            def url = "${baseUrl}/forecast?q=${encodedCity}&appid=${apiKey}&units=metric"
+            def url = "${baseUrl}/forecast?lat=${coordinates.lat}&lon=${coordinates.lon}&appid=${apiKey}&units=metric"
             
             def httpGet = new HttpGet(url)
             def response = httpClient.execute(httpGet)
@@ -369,7 +541,7 @@ class WeatherApiClient {
             
             if (response.statusLine.statusCode == 200) {
                 def forecastData = jsonSlurper.parseText(responseBody)
-                return formatForecastAsDaily(forecastData)
+                return formatForecastAsDaily(forecastData, coordinates)
             } else {
                 return handleApiError(response.statusLine.statusCode, city)
             }
@@ -382,10 +554,15 @@ class WeatherApiClient {
     }
     
     def getCityTimezone(String city) {
+        // First, get coordinates for the city
+        def coordinates = getCityCoordinates(city)
+        if (!coordinates) {
+            return TimeZone.getDefault()
+        }
+        
         def httpClient = HttpClients.createDefault()
         try {
-            def encodedCity = URLEncoder.encode(city, "UTF-8")
-            def url = "${baseUrl}/weather?q=${encodedCity}&appid=${apiKey}"
+            def url = "${baseUrl}/weather?lat=${coordinates.lat}&lon=${coordinates.lon}&appid=${apiKey}"
             
             def httpGet = new HttpGet(url)
             def response = httpClient.execute(httpGet)
@@ -424,9 +601,24 @@ class WeatherApiClient {
         }
     }
     
-    private def formatCurrentWeather(weatherData) {
+    private def formatCurrentWeather(weatherData, coordinates = null) {
         def result = []
-        result << "=== Current Weather for ${weatherData.name}, ${weatherData.sys.country} ==="
+        
+        // Use geocoding city name if available, otherwise fall back to weather API name
+        def cityName = coordinates?.name ?: weatherData.name
+        def countryCode = coordinates?.country ?: weatherData.sys.country
+        def stateCode = coordinates?.state ?: ""
+        
+        // For the header, include state in city name for US cities (for backward compatibility)
+        def headerCityName = cityName
+        if (stateCode && countryCode == "US") {
+            def stateName = USStateCodeUtil.getStateName(stateCode)
+            if (stateName) {
+                headerCityName = "${cityName}, ${stateName}"
+            }
+        }
+        
+        result << "=== Current Weather for ${headerCityName}, ${countryCode} ==="
         result << "Temperature: ${weatherData.main.temp}°C (feels like ${weatherData.main.feels_like}°C)"
         result << "Weather: ${weatherData.weather[0].main} - ${weatherData.weather[0].description}"
         result << "Humidity: ${weatherData.main.humidity}%"
@@ -437,7 +629,7 @@ class WeatherApiClient {
         return result.join("\n")
     }
     
-    private def formatForecastAsDaily(forecastData) {
+    private def formatForecastAsDaily(forecastData, coordinates = null) {
         def dayGroups = [:]
         
         forecastData.list.each { forecast ->
@@ -454,7 +646,21 @@ class WeatherApiClient {
         
         def result = []
         result << "DAILY_FORECAST_START"
-        result << "City: ${forecastData.city.name}, ${forecastData.city.country}"
+        
+        // Use geocoding city name if available, otherwise fall back to forecast API name
+        def cityName = coordinates?.name ?: forecastData.city.name
+        def countryCode = coordinates?.country ?: forecastData.city.country
+        def stateName = ""
+        
+        // Include state information for US cities
+        if (coordinates?.state && countryCode == "US") {
+            stateName = USStateCodeUtil.getStateName(coordinates.state)
+            if (stateName) {
+                cityName = "${cityName}, ${stateName}"
+            }
+        }
+        
+        result << "City: ${cityName}, ${countryCode}"
         
         sortedDays.each { dateStr ->
             result << "DAY_START:${dateStr}"
@@ -474,14 +680,16 @@ class WeatherApiClient {
  */
 class WeatherWebServer {
     
-    private final String apiKey
+    private final String openWeatherApiKey
+    private final String googleApiKey
     private final int port
     private final WeatherApiClient weatherClient
     
-    WeatherWebServer(String apiKey, int port = 8080) {
-        this.apiKey = apiKey
+    WeatherWebServer(String openWeatherApiKey, String googleApiKey, int port = 8080) {
+        this.openWeatherApiKey = openWeatherApiKey
+        this.googleApiKey = googleApiKey
         this.port = port
-        this.weatherClient = new WeatherApiClient(apiKey)
+        this.weatherClient = new WeatherApiClient(openWeatherApiKey)
     }
     
     void start() {
@@ -538,6 +746,8 @@ class WeatherWebServer {
                 
                 if (path.startsWith("/api/cities")) {
                     handleCitySuggestions(req, resp)
+                } else if (path.startsWith("/api/place-details")) {
+                    handlePlaceDetails(req, resp)
                 } else {
                     resp.status = 404
                     resp.writer.write("API endpoint not found")
@@ -555,41 +765,132 @@ class WeatherWebServer {
                 
                 def httpClient = HttpClients.createDefault()
                 try {
-                    def encodedQuery = URLEncoder.encode(query.trim(), "UTF-8")
-                    def url = "http://api.openweathermap.org/geo/1.0/direct?q=${encodedQuery}&limit=10&appid=${apiKey}"
+                    // Use Google Places Autocomplete API with restriction to cities only
+                    def url = "https://places.googleapis.com/v1/places:autocomplete"
                     
-                    def httpGet = new HttpGet(url)
-                    def response = httpClient.execute(httpGet)
+                    def httpPost = new HttpPost(url)
+                    httpPost.setHeader("Content-Type", "application/json")
+                    httpPost.setHeader("X-Goog-Api-Key", googleApiKey)
+                    
+                    // Create request body for Google Places API
+                    def requestBody = [
+                        input: query.trim(),
+                        includedPrimaryTypes: ["(cities)"],
+                        languageCode: "en"
+                    ]
+                    
+                    def requestJson = new JsonBuilder(requestBody).toString()
+                    httpPost.setEntity(new StringEntity(requestJson, "UTF-8"))
+                    
+                    def response = httpClient.execute(httpPost)
                     def responseBody = EntityUtils.toString(response.entity)
                     
                     if (response.statusLine.statusCode == 200) {
                         def jsonSlurper = new JsonSlurper()
-                        def cities = jsonSlurper.parseText(responseBody)
+                        def placesResponse = jsonSlurper.parseText(responseBody)
                         
-                        // Transform the response to our format
-                        def suggestions = cities.collect { city ->
-                            def countryName = CountryCodeUtil.getCountryName(city.country) ?: city.country
-                            [
-                                name: city.name,
-                                country: city.country,
-                                display: "${city.name}, ${countryName}",
-                                searchValue: "${city.name}, ${city.country}",
-                                lat: city.lat,
-                                lon: city.lon
-                            ]
+                        // Transform Google Places response to our format
+                        def suggestions = []
+                        if (placesResponse.suggestions) {
+                            suggestions = placesResponse.suggestions.collect { suggestion ->
+                                def placePrediction = suggestion.placePrediction
+                                if (placePrediction) {
+                                    // Extract city name and location details
+                                    def mainText = placePrediction.text?.text ?: placePrediction.description ?: ""
+                                    def secondaryText = placePrediction.structuredFormat?.secondaryText?.text ?: ""
+                                    
+                                    // For display, use the full description
+                                    def displayName = mainText
+                                    if (secondaryText && !mainText.contains(secondaryText)) {
+                                        displayName = "${mainText}, ${secondaryText}"
+                                    }
+                                    
+                                    // Extract basic location info from the description
+                                    def parts = displayName.split(",").collect { it.trim() }
+                                    def cityName = parts[0]
+                                    def country = parts.size() > 1 ? parts[-1] : ""
+                                    def state = parts.size() > 2 ? parts[-2] : ""
+                                    
+                                    [
+                                        name: cityName,
+                                        country: country,
+                                        state: state,
+                                        display: displayName,
+                                        searchValue: displayName,
+                                        placeId: placePrediction.placeId ?: "",
+                                        // Note: Google Places Autocomplete doesn't provide lat/lon directly
+                                        lat: null,
+                                        lon: null
+                                    ]
+                                }
+                            }.findAll { it != null }
                         }
                         
                         resp.contentType = "application/json"
                         resp.writer.write(new JsonBuilder(suggestions).toString())
                     } else {
+                        println "Google Places API error: ${response.statusLine.statusCode} - ${responseBody}"
                         resp.status = 500
                         resp.writer.write("[]")
                     }
                     
                 } catch (Exception e) {
-                    println "Error fetching city suggestions: ${e.message}"
+                    println "Error fetching city suggestions from Google Places: ${e.message}"
+                    e.printStackTrace()
                     resp.status = 500
                     resp.writer.write("[]")
+                } finally {
+                    httpClient.close()
+                }
+            }
+            
+            private void handlePlaceDetails(HttpServletRequest req, HttpServletResponse resp) {
+                def placeId = req.getParameter("place_id")
+                
+                if (!placeId || placeId.trim().isEmpty()) {
+                    resp.status = 400
+                    resp.writer.write('{"error": "place_id parameter required"}')
+                    return
+                }
+                
+                def httpClient = HttpClients.createDefault()
+                try {
+                    // Use Google Places Details API to get coordinates
+                    def url = "https://places.googleapis.com/v1/places/${placeId}"
+                    
+                    def httpGet = new HttpGet(url)
+                    httpGet.setHeader("X-Goog-Api-Key", googleApiKey)
+                    httpGet.setHeader("X-Goog-FieldMask", "location")
+                    
+                    def response = httpClient.execute(httpGet)
+                    def responseBody = EntityUtils.toString(response.entity)
+                    
+                    if (response.statusLine.statusCode == 200) {
+                        def jsonSlurper = new JsonSlurper()
+                        def placeDetails = jsonSlurper.parseText(responseBody)
+                        
+                        if (placeDetails.location) {
+                            def coordinates = [
+                                lat: placeDetails.location.latitude,
+                                lon: placeDetails.location.longitude
+                            ]
+                            resp.contentType = "application/json"
+                            resp.writer.write(new JsonBuilder(coordinates).toString())
+                        } else {
+                            resp.status = 404
+                            resp.writer.write('{"error": "Location not found"}')
+                        }
+                    } else {
+                        println "Google Places Details API error: ${response.statusLine.statusCode} - ${responseBody}"
+                        resp.status = 500
+                        resp.writer.write('{"error": "Failed to fetch place details"}')
+                    }
+                    
+                } catch (Exception e) {
+                    println "Error fetching place details: ${e.message}"
+                    e.printStackTrace()
+                    resp.status = 500
+                    resp.writer.write('{"error": "Internal server error"}')
                 } finally {
                     httpClient.close()
                 }
@@ -696,6 +997,7 @@ class WeatherWebServer {
     private String formatCurrentWeatherHtml(def lines, TimeZone cityTimezone, String yourTimezoneName, String cityTimezoneName) {
         def weatherData = [:]
         def cityName = ""
+        def stateName = ""
         def countryCode = ""
         
         lines.each { line ->
@@ -704,9 +1006,24 @@ class WeatherWebServer {
                 def match = line =~ /=== Current Weather for (.+?) ===/
                 if (match) {
                     def fullLocation = match[0][1]
-                    def locationParts = fullLocation.split(",", 2)
-                    cityName = locationParts.length > 0 ? locationParts[0].trim() : fullLocation
-                    countryCode = locationParts.length > 1 ? locationParts[1].trim() : ""
+                    def locationParts = fullLocation.split(",")
+                    
+                    if (locationParts.length >= 3) {
+                        // Format: "City, State, Country" (e.g., "Austin, Texas, US")
+                        cityName = locationParts[0].trim()
+                        stateName = locationParts[1].trim()
+                        countryCode = locationParts[2].trim()
+                    } else if (locationParts.length == 2) {
+                        // Format: "City, Country" (e.g., "London, GB")
+                        cityName = locationParts[0].trim()
+                        stateName = ""
+                        countryCode = locationParts[1].trim()
+                    } else {
+                        // Single location name
+                        cityName = fullLocation
+                        stateName = ""
+                        countryCode = ""
+                    }
                 }
             } else if (line.contains(":") && !line.isEmpty()) {
                 def parts = line.split(":", 2)
@@ -735,12 +1052,19 @@ class WeatherWebServer {
         html.append("<div class='current-weather-container'>")
         html.append("<div class='current-weather-top'>")
         
-        // Column 1: City, Country, Time
+        // Column 1: City, State (if present), Country, Time
         html.append("<div class='location-time-column'>")
         html.append("<div class='location-info'>")
         html.append("<div class='city-name-display'>${cityName}</div>")
+        if (stateName && !stateName.isEmpty()) {
+            html.append("<div class='state-name-display'>${stateName}</div>")
+        }
         if (countryCode) {
-            def countryName = CountryCodeUtil.getCountryName(countryCode)            
+            def countryName = CountryCodeUtil.getCountryName(countryCode)
+            // Special case for UK to show shorter name
+            if (countryCode == "GB" && countryName.startsWith("United Kingdom")) {
+                countryName = "United Kingdom"
+            }
             html.append("<div class='country-code-display'>${countryName}</div>")        
         }
         html.append("</div>")
@@ -948,23 +1272,43 @@ class WeatherWebServer {
     }
 }
 
-// Read API key from file
-def apiKeyFile = new File("../key")
-if (!apiKeyFile.exists()) {
-    apiKeyFile = new File("key") // Try current directory
+// Read API keys from files
+def openWeatherApiKey = ""
+def googleApiKey = ""
+
+// Try to read OpenWeatherMap API key
+def openWeatherKeyFile = new File("../key")
+if (!openWeatherKeyFile.exists()) {
+    openWeatherKeyFile = new File("key") // Try current directory
 }
-if (!apiKeyFile.exists()) {
-    println "Error: 'key' file not found"
+if (openWeatherKeyFile.exists()) {
+    openWeatherApiKey = openWeatherKeyFile.text.trim()
+}
+
+// Try to read Google API key from separate file
+def googleKeyFile = new File("../google-key")
+if (!googleKeyFile.exists()) {
+    googleKeyFile = new File("google-key") // Try current directory
+}
+if (googleKeyFile.exists()) {
+    googleApiKey = googleKeyFile.text.trim()
+}
+
+// Validate API keys
+if (openWeatherApiKey.isEmpty()) {
+    println "Error: OpenWeatherMap API key not found"
     println "Please create a file named 'key' containing your OpenWeatherMap API key"
+    println "Or create separate 'key' and 'google-key' files"
     System.exit(1)
 }
 
-def apiKey = apiKeyFile.text.trim()
-if (apiKey.isEmpty()) {
-    println "Error: 'key' file is empty"
+if (googleApiKey.isEmpty()) {
+    println "Error: Google Places API key not found"
+    println "Please create a file named 'google-key' containing your Google Places API key"
+    println "Or add the Google API key as the second line in the 'key' file"
     System.exit(1)
 }
 
 // Start the server
-def server = new WeatherWebServer(apiKey)
+def server = new WeatherWebServer(openWeatherApiKey, googleApiKey)
 server.start()
